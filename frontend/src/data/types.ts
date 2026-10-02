@@ -27,6 +27,18 @@ export type PageResult = {
   size: number
 }
 
+// 条件检索结果：命中为空时带上每个条件各自的命中数，页面能指出是哪个条件卡住的。
+export type FilterDiagnosis = {
+  field: string
+  value: string
+  matched: number
+  invalid?: boolean
+}
+
+export type QueryResult = PageResult & {
+  diagnoses: FilterDiagnosis[]
+}
+
 export type ActionResult = {
   ok: boolean
   message: string

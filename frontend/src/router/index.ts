@@ -6,6 +6,7 @@ const Stratum = () => import('@/views/stratum/index.vue')
 const Feature = () => import('@/views/feature/index.vue')
 const Find = () => import('@/views/find/index.vue')
 const Sherd = () => import('@/views/sherd/index.vue')
+const SherdDetail = () => import('@/views/sherd/detail.vue')
 const Bone = () => import('@/views/bone/index.vue')
 const Flotation = () => import('@/views/flotation/index.vue')
 const Dating = () => import('@/views/dating/index.vue')
@@ -29,6 +30,7 @@ const router = createRouter({
     { path: '/feature', name: 'feature', component: Feature },
     { path: '/find', name: 'find', component: Find },
     { path: '/sherd', name: 'sherd', component: Sherd },
+    { path: '/sherd/detail', name: 'sherd-detail', component: SherdDetail },
     { path: '/bone', name: 'bone', component: Bone },
     { path: '/flotation', name: 'flotation', component: Flotation },
     { path: '/dating', name: 'dating', component: Dating },

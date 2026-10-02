@@ -43,7 +43,16 @@
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
-          <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td v-for="column in columns" :key="column">
+            <RouterLink
+              v-if="column === '来源拼对编号' && row[column]"
+              class="link"
+              :to="{ path: '/sherd/detail', query: { code: String(row[column]) } }"
+            >
+              {{ row[column] }}
+            </RouterLink>
+            <template v-else>{{ row[column] === '' || row[column] == null ? '—' : row[column] }}</template>
+          </td>
           <td>{{ row.status }}</td>
           <td class="row-actions">
             <button
@@ -82,7 +91,7 @@ import {
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('find')
-const columns = ["器物编号", "出土探方", "出土层位", "器物类别", "质地", "完残程度", "最大尺寸", "登记状态"]
+const columns = meta.fields
 const actions = ["提交登记", "完成编目", "提交复检"]
 const statuses = ["待登记", "已登记", "已编目", "待复检"]
 const stats = [{"label": "待登记器物", "value": 0}, {"label": "已编目器物", "value": 0}, {"label": "本月出土件数", "value": 0}]
@@ -91,7 +100,7 @@ const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
-const filterFields = columns.slice(0, 3)
+const filterFields = ["器物编号", "陶系", "纹饰"]
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
