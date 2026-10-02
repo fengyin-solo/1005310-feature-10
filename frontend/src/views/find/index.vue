@@ -67,6 +67,45 @@
       <span>共 {{ total }} 条出土物登记记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
+
+    <section class="ledger-section">
+      <h3>复原器物入账清单</h3>
+      <p class="page-desc">
+        由陶片拼对「确认复原」批复驱动入账；陶系、纹饰两处填得不一致时，以拼对原始记录为准。
+      </p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>器物编号</th>
+            <th>来源拼对编号</th>
+            <th>陶系</th>
+            <th>纹饰</th>
+            <th>器物类别</th>
+            <th>完残程度</th>
+            <th>登记状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in ledger" :key="String(row.id)">
+            <td>{{ row['器物编号'] ?? '—' }}</td>
+            <td>
+              <RouterLink :to="sherdLink(row)">{{ row['来源拼对编号'] }}</RouterLink>
+            </td>
+            <td>{{ row['陶系'] || '—' }}</td>
+            <td>{{ row['纹饰'] || '—' }}</td>
+            <td>{{ row['器物类别'] || '—' }}</td>
+            <td>{{ row['完残程度'] || '—' }}</td>
+            <td>
+              {{ row['登记状态'] || '—' }}
+              <span v-if="row['台账有出入']" class="legend-item">已按原始记录校正</span>
+            </td>
+          </tr>
+          <tr v-if="!ledger.length">
+            <td colspan="7" class="empty-state">暂无复原入账记录，拼对记录「确认复原」后自动入账</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
   </section>
 </template>
 
@@ -76,6 +115,7 @@ import { computed, onMounted, ref } from 'vue'
 import {
   downloadEntries,
   listEntries,
+  listLedgerEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
@@ -88,6 +128,7 @@ const statuses = ["待登记", "已登记", "已编目", "待复检"]
 const stats = [{"label": "待登记器物", "value": 0}, {"label": "已编目器物", "value": 0}, {"label": "本月出土件数", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
+const ledger = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
@@ -98,6 +139,14 @@ const statusSummary = computed(() =>
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+
+function sherdLink(row: EntryRow) {
+  return {
+    name: 'sherd-detail',
+    params: { code: String(row['来源拼对编号']) },
+    query: { from: 'find' },
+  }
+}
 
 function resetFilters() {
   filters.value = {}
@@ -128,6 +177,7 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    ledger.value = listLedgerEntries()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '出土物登记列表读取失败'
   }

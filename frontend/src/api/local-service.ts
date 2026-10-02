@@ -1,6 +1,14 @@
 import { MODULE_BY_KEY } from '@/data/modules'
+import { ledgerEntries, syncRestoredToLedger } from '@/data/ledger'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
-import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
+import {
+  applySherdFilters,
+  dedupeByCode,
+  diagnoseEmpty,
+  nextSherdCode,
+  sortByPiecesDesc,
+} from '@/data/sherd-rules'
+import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult, SherdListResult } from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
 const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
@@ -53,12 +61,72 @@ export function runAction(key: string, id: number, action: string): ActionResult
   const next = [...rows]
   next[index] = updated
   saveRows(key, next)
-  return { ok: true, message: `${meta.entity}已${action}，当前状态「${target}」` }
+  // 复原确认批复驱动出土物台账：拼对记录一确认复原，台账同步入账。
+  const ledgerNote = key === 'sherd' && target === '已复原' ? syncRestoredToLedger(updated) : ''
+  return { ok: true, message: `${meta.entity}已${action}，当前状态「${target}」${ledgerNote}` }
 }
 
 export function resetModule(key: string): PageResult {
   resetRows(key)
   return listEntries(key)
+}
+
+// 陶片拼对列表：先按拼对编号去重（重复提交只留第一条），再按条件取交集，
+// 需要时按拼合片数从多到少排序；命中为空时给出是哪个条件卡住的。
+export function listSherdEntries(
+  filters: Record<string, string> = {},
+  sortPiecesDesc = false,
+): SherdListResult {
+  const { rows: all, dropped } = dedupeByCode(listRows('sherd'))
+  const matched = applySherdFilters(all, filters)
+  const items = sortPiecesDesc ? sortByPiecesDesc(matched) : matched
+  const emptyHints = items.length === 0 ? diagnoseEmpty(all, filters) : []
+  return { items, total: items.length, dropped, emptyHints }
+}
+
+// 按拼对编号取记录：多处入口共用同一份数据，重复编号只认第一条。
+export function getSherdByCode(code: string): EntryRow | null {
+  return listRows('sherd').find((row) => String(row['拼对编号']) === code) ?? null
+}
+
+// 登记拼对记录：编号留空时沿用既有编排顺延取号；编号重复时只保留第一条，不再入账。
+export function createSherdEntry(fields: Record<string, string>): ActionResult {
+  const meta = moduleMeta('sherd')
+  const rows = listRows('sherd')
+  const clean = (field: string) => (fields[field] ?? '').trim()
+  const code = clean('拼对编号') || nextSherdCode(rows)
+  if (rows.some((row) => String(row['拼对编号']) === code)) {
+    return { ok: true, message: `拼对编号 ${code} 已存在，重复提交只保留第一条，本次未重复登记` }
+  }
+  if (clean('所属单位') === '') {
+    return { ok: false, message: '所属单位不能为空' }
+  }
+  const pieces = clean('拼合片数')
+  if (pieces !== '' && !/^\d+$/.test(pieces)) {
+    return { ok: false, message: '拼合片数需填非负整数' }
+  }
+  const id = rows.reduce((max, row) => Math.max(max, Number(row.id) || 0), 0) + 1
+  const row: EntryRow = {
+    id,
+    status: meta.statuses[0],
+    pending: true,
+    abnormal: false,
+    拼对编号: code,
+    所属单位: clean('所属单位'),
+    陶系: clean('陶系'),
+    纹饰: clean('纹饰'),
+    可辨器型: clean('可辨器型'),
+    拼合片数: pieces,
+    拼对结论: clean('拼对结论'),
+    拼对状态: meta.statuses[0],
+  }
+  saveRows('sherd', [...rows, row])
+  return { ok: true, message: `已登记拼对记录 ${code}，当前状态「${meta.statuses[0]}」` }
+}
+
+// 出土物台账里由复原确认批复驱动的清单，陶系、纹饰以拼对原始记录为准。
+export function listLedgerEntries(): EntryRow[] {
+  return ledgerEntries()
 }
 
 export function exportEntries(key: string): { filename: string; content: string } {

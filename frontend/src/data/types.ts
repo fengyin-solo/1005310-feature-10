@@ -27,6 +27,15 @@ export type PageResult = {
   size: number
 }
 
+export type SherdListResult = {
+  items: EntryRow[]
+  total: number
+  /** 因拼对编号重复被去掉的条数（只保留第一条） */
+  dropped: number
+  /** 命中为空时说明是哪个条件卡住了 */
+  emptyHints: string[]
+}
+
 export type ActionResult = {
   ok: boolean
   message: string

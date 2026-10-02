@@ -3,10 +3,10 @@
     <header class="page-head">
       <div>
         <h2>陶片拼对管理</h2>
-        <p class="page-desc">维护拼对记录，围绕拼对编号、所属单位、陶系、纹饰做登记、筛选与状态流转。</p>
+        <p class="page-desc">维护拼对记录，围绕拼对编号、陶系、纹饰、拼合片数做登记、检索与状态流转。</p>
       </div>
       <div class="page-actions">
-        <button class="btn primary" type="button" @click="openCreate">登记拼对记录</button>
+        <button class="btn primary" type="button" @click="createOpen = !createOpen">登记拼对记录</button>
         <button class="btn" type="button" @click="exportRows">导出陶片拼对清单</button>
       </div>
     </header>
@@ -24,10 +24,23 @@
       </span>
     </p>
 
-    <form class="filter-bar" @submit.prevent="reload">
+    <form v-if="createOpen" class="create-panel" @submit.prevent="submitCreate">
+      <label v-for="field in createFields" :key="field.key" class="filter-item">
+        <span>{{ field.key }}</span>
+        <input v-model="createForm[field.key]" :placeholder="field.placeholder" />
+      </label>
+      <button class="btn primary" type="submit">提交登记</button>
+      <button class="btn ghost" type="button" @click="createOpen = false">取消</button>
+    </form>
+
+    <form class="filter-bar" @submit.prevent="applyQuery">
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
         <input v-model="filters[field]" :placeholder="`按${field}检索`" />
+      </label>
+      <label class="sort-toggle">
+        <input v-model="sortPiecesDesc" type="checkbox" />
+        <span>按拼合片数从多到少</span>
       </label>
       <button class="btn" type="submit">查询</button>
       <button class="btn ghost" type="button" @click="resetFilters">重置条件</button>
@@ -43,7 +56,12 @@
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
-          <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td v-for="column in columns" :key="column">
+            <RouterLink v-if="column === '拼对编号'" :to="detailLink(row)">
+              {{ row[column] ?? '—' }}
+            </RouterLink>
+            <template v-else>{{ row[column] ?? '—' }}</template>
+          </td>
           <td>{{ row.status }}</td>
           <td class="row-actions">
             <button
@@ -58,24 +76,36 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 2" class="empty-state">暂无陶片拼对数据，可先登记拼对记录</td>
+          <td :colspan="columns.length + 2" class="empty-state">
+            <div v-if="emptyHints.length" class="empty-hints">
+              <p>没有命中符合条件的拼对记录：</p>
+              <p v-for="hint in emptyHints" :key="hint">{{ hint }}</p>
+            </div>
+            <span v-else>暂无陶片拼对数据，可先登记拼对记录</span>
+          </td>
         </tr>
       </tbody>
     </table>
 
     <footer class="page-foot">
-      <span>共 {{ total }} 条陶片拼对记录</span>
+      <span>
+        共 {{ total }} 条陶片拼对记录
+        <template v-if="dropped">（{{ dropped }} 条重复提交已按拼对编号去重，仅保留第一条）</template>
+      </span>
+      <span v-if="notice" class="notice-text">{{ notice }}</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import {
+  createSherdEntry,
   downloadEntries,
-  listEntries,
+  listSherdEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
@@ -87,11 +117,18 @@ const actions = ["提交拼对", "确认复原", "终止拼对"]
 const statuses = ["待拼对", "拼对中", "已复原", "已放弃"]
 const stats = [{"label": "待拼对记录", "value": 0}, {"label": "拼对中记录", "value": 0}, {"label": "已复原器物", "value": 0}]
 
+const route = useRoute()
+const router = useRouter()
+
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
+const dropped = ref(0)
+const emptyHints = ref<string[]>([])
 const errorMessage = ref('')
+const notice = ref('')
 const filters = ref<Record<string, string>>({})
-const filterFields = columns.slice(0, 3)
+const sortPiecesDesc = ref(false)
+const filterFields = ["拼对编号", "陶系", "纹饰", "拼合片数"]
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -99,8 +136,74 @@ const statusSummary = computed(() =>
   })),
 )
 
+// 检索条件同步进地址栏：从详情页退回时还能落在原来的条件上。
+const QUERY_KEYS: Record<string, string> = { code: '拼对编号', ware: '陶系', decor: '纹饰', pieces: '拼合片数' }
+
+function syncFromQuery() {
+  const next: Record<string, string> = {}
+  for (const [key, field] of Object.entries(QUERY_KEYS)) {
+    const value = route.query[key]
+    if (typeof value === 'string' && value !== '') {
+      next[field] = value
+    }
+  }
+  filters.value = next
+  sortPiecesDesc.value = route.query.sort === 'pieces'
+}
+
+function applyQuery() {
+  const query: Record<string, string> = {}
+  for (const [key, field] of Object.entries(QUERY_KEYS)) {
+    const value = (filters.value[field] ?? '').trim()
+    if (value !== '') {
+      query[key] = value
+    }
+  }
+  if (sortPiecesDesc.value) {
+    query.sort = 'pieces'
+  }
+  router.replace({ name: 'sherd', query })
+  reload()
+}
+
 function resetFilters() {
   filters.value = {}
+  sortPiecesDesc.value = false
+  router.replace({ name: 'sherd' })
+  reload()
+}
+
+function detailLink(row: EntryRow) {
+  return {
+    name: 'sherd-detail',
+    params: { code: String(row['拼对编号']) },
+    query: { ...route.query },
+  }
+}
+
+const createOpen = ref(false)
+const createFields = [
+  { key: '拼对编号', placeholder: '留空按既有编排自动取号' },
+  { key: '所属单位', placeholder: '如 T0101③' },
+  { key: '陶系', placeholder: '如 夹砂灰陶' },
+  { key: '纹饰', placeholder: '如 绳纹' },
+  { key: '可辨器型', placeholder: '如 罐' },
+  { key: '拼合片数', placeholder: '填数字' },
+  { key: '拼对结论', placeholder: '选填' },
+]
+const createForm = ref<Record<string, string>>({})
+
+function submitCreate() {
+  errorMessage.value = ''
+  notice.value = ''
+  const result = createSherdEntry(createForm.value)
+  if (!result.ok) {
+    errorMessage.value = result.message
+    return
+  }
+  notice.value = result.message
+  createForm.value = {}
+  createOpen.value = false
   reload()
 }
 
@@ -108,30 +211,33 @@ function exportRows() {
   downloadEntries(meta.key)
 }
 
-function openCreate() {
-  errorMessage.value = '拼对记录登记入口尚未接入审批流'
-}
-
 function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
+  notice.value = ''
   const result = applyAction(meta.key, Number(row.id), action)
   if (!result.ok) {
     errorMessage.value = result.message
     return
   }
+  notice.value = result.message
   reload()
 }
 
 function reload() {
   errorMessage.value = ''
   try {
-    const payload = listEntries(meta.key, filters.value)
+    const payload = listSherdEntries(filters.value, sortPiecesDesc.value)
     rows.value = payload.items
     total.value = payload.total
+    dropped.value = payload.dropped
+    emptyHints.value = payload.emptyHints
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '陶片拼对列表读取失败'
   }
 }
 
-onMounted(reload)
+watch(() => route.query, () => {
+  syncFromQuery()
+  reload()
+}, { immediate: true })
 </script>
